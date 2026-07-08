@@ -20,7 +20,7 @@ MultiRAG is an enterprise-grade, multi-modal Retrieval-Augmented Generation (RAG
 - [Performance Optimizations](#performance-optimizations)
 - [Current Features](#current-features)
 - [Upcoming Features](#upcoming-features)
-- [API Details](#api-details)
+- [External API Integrations](#external-api-integrations)
 - [Author](#author)
 - [License](#license)
 
@@ -216,6 +216,14 @@ MultiRAG/
 - **Chat History**: Maintaining conversation memory for follow-up questions.
 - **Expanded File Support**: Adding support for `.docx`, `.txt`, and `.csv` files.
 - **Cloud Storage Integration**: Direct ingestion from Google Drive and AWS S3.
+
+---
+
+## External API Integrations
+
+MultiRAG relies on a robust backend architecture that orchestrates multiple external APIs:
+- **Google Gemini API**: Makes `POST` requests to generate high-dimensional text embeddings, process images using Gemini Vision, and generate the final RAG text responses.
+- **Pinecone API**: Makes batched `POST` requests (upserts) to securely store vector data and handles `POST` query requests to perform sub-second cosine similarity searches across the document database.
 
 ---
 
