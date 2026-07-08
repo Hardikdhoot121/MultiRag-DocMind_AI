@@ -1,9 +1,9 @@
 import streamlit as st
-from utils.file_router import file_router
+from routes.file_router import file_router
 from utils.file_handler import save_uploaded_file
 from utils.chunking import createChunks
 from utils.embeddings import getEmbeddings
-from utils.vector_store import upload_to_pinecone
+from models.vector_store import upload_to_pinecone
 from utils.retrieval import get_retriever
 from utils.prompt import get_rag_prompt
 import math
