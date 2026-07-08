@@ -5,5 +5,5 @@ def createChunks(text):
         chunk_overlap=500,
         separators=["\n\n", "\n", ".", " ",""]
     )
-    chunks=splitter.create_documents([text])
+    chunks=splitter.split_documents(text)
     return chunks 

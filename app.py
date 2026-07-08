@@ -1,6 +1,6 @@
 import streamlit as st
+from utils.file_router import file_router
 from utils.file_handler import save_uploaded_file
-from utils.pdf_loader import extract_pdf
 from utils.chunking import createChunks
 from utils.embeddings import getEmbeddings
 from utils.vector_store import upload_to_pinecone
@@ -15,69 +15,81 @@ from config import GOOGLE_API_KEY
 st.set_page_config(page_title="DocMind AI")
 st.title("📚 DocMind AI")
 
-uploaded_file = st.file_uploader(
-    "Upload PDF",
-    type=["pdf"]
+uploaded_files = st.file_uploader(
+    "Upload PDF or Image (MAX 4)",
+    type=["pdf", "png", "jpg", "jpeg"],
+    accept_multiple_files=True
 )
-if uploaded_file:
-    file_path = save_uploaded_file(uploaded_file)
-    st.success("File Uploaded successfully")
-    result = extract_pdf(file_path)
-    st.write("### Total Pages")
-    st.write(result["pages"])
-    chunks = createChunks(result["text"])
 
-# estimated time based upon chunks
-    total_batches = math.ceil(len(chunks) / 5)
-    estimated_seconds = (total_batches - 1) * 62
-    estimated_minutes = estimated_seconds // 60
-    st.info(f"⏳ Estimated time to index: ~{estimated_minutes} minutes ({total_batches} batches)")
+if uploaded_files:
+    if len(uploaded_files) > 4:
+        st.error("You can only upload a maximum of 4 files")
+    else :
+        file_paths=[] #This will be send to router 
+        for uploaded_file in uploaded_files:
+            temp_path=save_uploaded_file(uploaded_file)
+            file_paths.append(temp_path)
 
-# calling upload_to_pinecone() => hitting the API quota again and again, so fixing that bug 
-    if "uploaded_file_name" not in st.session_state or st.session_state.uploaded_file_name != uploaded_file.name:
-        with st.spinner("Embedding and uploading to Pinecone... (this may take a while for large documents)"):
-            embedding_model = getEmbeddings()
-            upload_to_pinecone(chunks, embedding_model)
+        st.success("All Files Uploaded successfully")
         
-# Save the file name and embedding model to session_state so we don't redo this
-        st.session_state.uploaded_file_name = uploaded_file.name
-        st.session_state.embedding_model = embedding_model
+        # check -> if previously uploaded then just fetch the embeddings 
+        #       -> else run the entire pipeline 
+        current_files_hash = ",".join(sorted([f.name for f in uploaded_files]))
+        if "uploaded_files_hash" not in st.session_state or st.session_state.uploaded_files_hash != current_files_hash:
+     
+            result = file_router(file_paths)
+            st.write(f"### Total Documents: {len(result)}")
+            chunks = createChunks(result)
 
-    else:
-        embedding_model = st.session_state.embedding_model
+            total_batches = math.ceil(len(chunks) / 5)
+            estimated_seconds = (total_batches - 1) * 15
+            estimated_minutes = estimated_seconds // 60
+            st.info(f"⏳ Estimated time to index: ~{estimated_minutes} minutes ({total_batches} batches)")
 
-    index = get_retriever()
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=GOOGLE_API_KEY
-    )
+            with st.spinner("Embedding and uploading to Pinecone..."):
+                embedding_model = getEmbeddings()
+                upload_to_pinecone(chunks, embedding_model)
 
-# fetch context from Pinecone
-    def retrieve_context(question: str) -> str:
-        query_vector = embedding_model.embed_query(question)
-        response = index.query(
-            vector=query_vector,
-            top_k=3,
-            include_metadata=True
+            st.session_state.uploaded_files_hash = current_files_hash
+            st.session_state.embedding_model = embedding_model
+            st.success("Documents indexed successfully!")
+        else:
+            embedding_model = st.session_state.embedding_model
+
+        # RETRIEVAL (runs every timedef , but is instant)
+        index = get_retriever()
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-flash-latest",
+            google_api_key=GOOGLE_API_KEY
         )
-        return "\n\n".join([match["metadata"]["text"] for match in response["matches"]])
 
-    prompt = get_rag_prompt()
+        def retrieve_context(question: str) -> str:
+            query_vector = embedding_model.embed_query(question)
+            response = index.query(
+                vector=query_vector,
+                top_k=3,
+                include_metadata=True
+            )
+            return "\n\n".join([match["metadata"]["text"] for match in response["matches"]])
+        # AUGEMENTATION 
+        prompt = get_rag_prompt()
 
-# Build the sequential and parallel chain using LangChain Runnables (LCEL)
-    rag_chain = (
-        {
-            "context": retrieve_context,
-            "question": RunnablePassthrough()
-        }
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
+        # Build the sequential and parallel chain using LangChain Runnables (LCEL)
+        rag_chain = (
+            {
+                "context": retrieve_context,
+                "question": RunnablePassthrough()
+            }
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        # GENERATION
+        query = st.text_input("Ask a question about the documents:")
+        if query:
+            with st.spinner("Generating answer..."):
+                answer = rag_chain.invoke(query)
+            st.write("### Answer:")
+            st.info(answer)
 
-    query = st.text_input("Ask a question about the document:")
-    if query:
-        with st.spinner("Generating answer..."):
-            answer = rag_chain.invoke(query)
-        st.write("### Answer:")
-        st.info(answer)
+

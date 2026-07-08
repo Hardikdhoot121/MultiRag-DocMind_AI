@@ -5,6 +5,8 @@ import time
 def upload_to_pinecone(chunks, embedding_model):
     pc = Pinecone(api_key=PINECONE_API_KEY)
     index = pc.Index(PINECONE_INDEX_NAME)
+    
+    index.delete(delete_all=True)
 
     texts = [doc.page_content for doc in chunks]
     embeddings = []
