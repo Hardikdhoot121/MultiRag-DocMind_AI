@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 UPLOAD_DIR = "uploads" 
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 # temp upload -> ./uploads
 def save_uploaded_file(uploaded_file):
     file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
