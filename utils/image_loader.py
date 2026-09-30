@@ -14,7 +14,8 @@ def describe_image(image_path):
 
     model = ChatGoogleGenerativeAI(
         model="gemini-3.1-flash-lite", 
-        google_api_key=GOOGLE_API_KEY
+        google_api_key=GOOGLE_API_KEY,
+        max_retries=4
     )
     message = HumanMessage(
         content=[
@@ -28,15 +29,17 @@ def describe_image(image_path):
             },
         ]
     )
-    response = model.invoke([message])
-
-    if isinstance(response.content, str):
-        content_text = response.content
-    else:
-        content_text = ""
-        for part in response.content:
-            if isinstance(part, dict) and "text" in part:
-                content_text += part["text"]
+    try:
+        response = model.invoke([message])
+        if isinstance(response.content, str):
+            content_text = response.content
+        else:
+            content_text = ""
+            for part in response.content:
+                if isinstance(part, dict) and "text" in part:
+                    content_text += part["text"]
+    except Exception as e:
+        content_text = f"[Image description temporary error: {e}]"
 
     # wrap it with meta data and return as list format
     doc = Document(

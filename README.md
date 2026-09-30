@@ -4,7 +4,7 @@ Python • Streamlit • LangChain • Gemini • Pinecone • PyMuPDF • Multi
 
 **[🌐 View Live Streamlit App Here](https://your-app-url-goes-here.streamlit.app/)**
 
-MultiRAG is an enterprise-grade, multi-modal Retrieval-Augmented Generation (RAG) pipeline. It allows users to upload multiple PDFs and images simultaneously, semantically search through their contents, and generate accurate, source-aware answers using Google's Gemini models and Pinecone's vector database.
+MultiRAG is a multi-modal Retrieval-Augmented Generation (RAG) pipeline built to bridge structured document extraction and visual content analysis. It enables users to upload multiple PDFs and images (`.png`, `.jpg`, `.jpeg`), indexes them into a unified vector space via Pinecone, and answers context-specific questions with source-bounded responses using Google's Gemini models.
 
 ---
 
@@ -17,9 +17,9 @@ MultiRAG is an enterprise-grade, multi-modal Retrieval-Augmented Generation (RAG
 - [Installation](#installation)
 - [Environment Variables](#environment-variables)
 - [Folder Structure](#folder-structure)
-- [Performance Optimizations](#performance-optimizations)
-- [Current Features](#current-features)
-- [Upcoming Features](#upcoming-features)
+- [Performance & Design Trade-offs](#performance--design-trade-offs)
+- [Current Implementation Status](#current-implementation-status)
+- [Future Roadmap & Improvements](#future-roadmap--improvements)
 - [External API Integrations](#external-api-integrations)
 - [Author](#author)
 - [License](#license)
@@ -28,80 +28,65 @@ MultiRAG is an enterprise-grade, multi-modal Retrieval-Augmented Generation (RAG
 
 ## Features
 
-- **Multi PDF Upload**: Process and index multiple PDF documents in a single session.
-- **Multi Image Upload**: Native support for processing `.png`, `.jpg`, and `.jpeg` files.
-- **Multi-Modal Retrieval-Augmented Generation**: Unified querying across text documents and image descriptions.
-- **Semantic Search**: Highly accurate vector-based search using Pinecone.
-- **Google Gemini Models**: Utilizing the latest Gemini Flash and Vision models for generation and understanding.
-- **Gemini Embeddings**: High-dimensional text embeddings for optimal retrieval accuracy.
-- **PyMuPDF PDF Parsing**: Extremely fast and reliable PDF text extraction.
-- **Image Understanding**: Converting images to textual descriptions using Gemini Vision.
-- **Recursive Character Text Splitting**: Intelligent chunking of large texts without breaking semantic context.
-- **Metadata Preservation**: Automatic tracking of source files, document types, and page numbers.
-- **LangChain LCEL Pipeline**: Streamlined, declarative pipeline for the retrieval and generation chain.
-- **Source-aware Responses**: The LLM strictly answers based on retrieved context.
-- **Duplicate File Caching**: Intelligent session-state hashing to prevent redundant embedding of unchanged files.
-- **Rate Limit Handling**: Built-in batching and sleep intervals to respect API free-tier quotas.
-- **Streamlit Interface**: Clean, interactive frontend for seamless user experience.
+- **Multi-File Batch Processing**: Ingest and index multiple PDF documents and images within a single session.
+- **Image-to-Text Semantic Translation**: Transforms visual inputs (`.png`, `.jpg`, `.jpeg`) into dense text descriptions using `gemini-3.1-flash-lite` before indexing.
+- **Unified Vector Space**: Combines PyMuPDF document chunks and Gemini Vision image descriptions into a single retriever pipeline.
+- **Sub-Second Similarity Search**: Vector retrieval powered by Pinecone's cosine distance index.
+- **LangChain LCEL Chain**: Modern, pipe-based chain (`retriever | prompt | llm | parser`) for clear control flow and execution tracking.
+- **Metadata Tagging**: Preserves source file names and document structures across chunks for context assembly.
+- **Rate-Limit Resilient**: Embedded exponential retry logic (`max_retries=4`) and batch sleep intervals to prevent Gemini API quota throttling.
+- **Session-Based UI Caching**: Prevents redundant vector upserts during active Streamlit user sessions when document selections remain identical.
 
 ---
 
 ## Technology Stack
 
-| Component | Technology |
-|---|---|
-| **Language** | Python 3.12+ |
-| **Frontend** | Streamlit |
-| **Framework** | LangChain |
-| **Generation LLM** | Gemini Flash Latest |
-| **Embedding Model** | Google Gemini Embedding 001 |
-| **Image Understanding** | Gemini 3.1 Flash Lite (Vision) |
-| **Vector Database** | Pinecone |
-| **PDF Parser** | PyMuPDF |
-| **Chunking** | RecursiveCharacterTextSplitter |
+| Component | Technology | Role / Model |
+|---|---|---|
+| **Language** | Python 3.12+ | Core runtime |
+| **Frontend UI** | Streamlit | Web interface & session state management |
+| **Orchestration** | LangChain (LCEL) | Retrieval & generation chain wiring |
+| **Generation LLM** | Google Gemini (`gemini-flash-latest`) | Context-bounded response generation |
+| **Embedding Model** | Google Generative AI Embeddings (`text-embedding-004`) | 768-dimensional text vector generation |
+| **Vision Model** | Google Gemini (`gemini-3.1-flash-lite`) | Image-to-text description extraction |
+| **Vector Database** | Pinecone DB | Vector indexing and top-K similarity search |
+| **PDF Parser** | PyMuPDF (`fitz`) | Fast text extraction from PDF pages |
+| **Text Splitter** | `RecursiveCharacterTextSplitter` | Chunking (`chunk_size=5000`, `overlap=200`) |
 
 ---
 
 ## Architecture
 
 ```text
-               Upload
-          PDF  PDF  IMG  IMG
-                    │
-                    ▼
-               File Router
-          ┌─────────┴─────────┐
-          │                   │
-      PDF Loader        Image Loader
-          │                   │
-     PyMuPDF           Gemini Vision
-          │                   │
-      Documents       Image Description
-          └─────────┬─────────┘
-                    ▼
-            Merge Documents
-                    ▼
-               Chunking
-                    ▼
-             Embedding Model
-                    ▼
-               Pinecone
-
-────────────────────────────────────────
-
-              User Question
-                    ▼
-             Query Embedding
-                    ▼
-         Pinecone Similarity Search
-                    ▼
-        Top-K Relevant Chunks
-                    ▼
-          ChatPromptTemplate
-                    ▼
-          Gemini Flash Latest
-                    ▼
-             Final Answer
+                 Uploaded Files
+             ┌──────────┴──────────┐
+             ▼                     ▼
+          PDF Files           Image Files
+             │                     │
+             ▼                     ▼
+       PyMuPDF Loader        Gemini Vision
+     (Extract Page Text)  (Extract Text Summary)
+             │                     │
+             └──────────┬──────────┘
+                        ▼
+                Merged Documents
+                        ▼
+            Recursive Character Splitter
+              (5000 chars / 200 overlap)
+                        ▼
+          Gemini Embedding (text-embedding-004)
+                        ▼
+              Pinecone Vector Index
+ ───────────────────────────────────────────────────
+                  User Query
+                        ▼
+           Pinecone Vector Similarity Match
+                        ▼
+               Top-K Context Chunks
+                        ▼
+           LCEL Prompt + Gemini Flash LLM
+                        ▼
+                  Final Response
 ```
 
 ---
@@ -110,12 +95,10 @@ MultiRAG is an enterprise-grade, multi-modal Retrieval-Augmented Generation (RAG
 
 ### Prerequisites
 
-Before you begin, ensure you have the following installed and configured:
-
 - **Python 3.12+**
 - **Git**
-- **Google Gemini API Key**: [Get it here](https://aistudio.google.com/app/apikey)
-- **Pinecone API Key**: [Get it here](https://www.pinecone.io/)
+- **Google Gemini API Key**: [Get key from Google AI Studio](https://aistudio.google.com/app/apikey)
+- **Pinecone API Key & Index**: [Get key from Pinecone Console](https://www.pinecone.io/)
 
 ---
 
@@ -151,15 +134,15 @@ pip install -r requirements.txt
 
 ## Environment Variables
 
-Create a `.env` file in the root directory and add the following keys.
+Create a `.env` file in the root project directory:
 
-| Variable | Description |
-|---|---|
-| `GOOGLE_API_KEY` | Your Google Gemini API key for embeddings, vision, and text generation. |
-| `PINECONE_API_KEY` | Your Pinecone database API key for vector storage. |
-| `PINECONE_INDEX_NAME` | The exact name of the Pinecone index you created in your dashboard. |
+```env
+GOOGLE_API_KEY=your_google_gemini_api_key
+PINECONE_API_KEY=your_pinecone_api_key
+PINECONE_INDEX_NAME=docmind-ai
+```
 
-To start the application, run:
+To run the application locally:
 ```bash
 streamlit run app.py
 ```
@@ -169,61 +152,61 @@ streamlit run app.py
 ## Folder Structure
 
 ```text
-MultiRAG/
+MultiRag_pipeline/
 ├── models/
-│   └── vector_store.py     # Pinecone index management and batch uploading
+│   └── vector_store.py     # Pinecone initialization, batching, and index upsert logic
 ├── routes/
-│   └── file_router.py      # Dispatches files to appropriate loaders based on extension
+│   └── file_router.py      # Extension-based loader routing (PDF vs Image)
 ├── utils/
-│   ├── file_handler.py     # Saves Streamlit UploadedFile objects to temporary disk
-│   ├── chunking.py         # Handles RecursiveCharacterTextSplitter logic
-│   ├── embeddings.py       # Initializes Gemini embeddings
-│   ├── image_loader.py     # Uses Gemini Vision to convert images to Document objects
-│   ├── pdf_loader.py       # Uses PyMuPDF to extract text into Document objects
-│   ├── prompt.py           # Defines the RAG ChatPromptTemplate
-│   └── retrieval.py        # Initializes the Pinecone retriever
-├── uploads/                # Temporary directory for file processing
-├── app.py                  # Main Streamlit application entry point
-├── config.py               # Environment variable loader
-├── requirements.txt        # Project dependencies
-├── .env                    # Secret keys
+│   ├── file_handler.py     # Local file persistence to temporary uploads directory
+│   ├── chunking.py         # RecursiveCharacterTextSplitter configuration
+│   ├── embeddings.py       # Initializes Gemini text-embedding-004 model
+│   ├── image_loader.py     # Base64 encoding & Gemini Vision description extraction
+│   ├── pdf_loader.py       # PyMuPDF text loader and page metadata extraction
+│   ├── prompt.py           # System RAG ChatPromptTemplate definition
+│   └── retrieval.py        # Pinecone similarity search retriever wrapper
+├── uploads/                # Temporary disk storage for uploaded session files
+├── app.py                  # Main Streamlit app entry point & LCEL chain execution
+├── config.py               # Environment configuration loader
+├── requirements.txt        # Python package dependencies
 └── README.md               # Project documentation
 ```
 
 ---
 
-## Performance Optimizations
+## Performance & Design Trade-offs
 
-- **Duplicate File Detection**: The application calculates a stable hash of the uploaded filenames. If the hash remains unchanged between queries, the system completely bypasses the expensive embedding and upload phases, utilizing the cached Pinecone index instead.
-- **Rate Limit Batching**: Free-tier Google API rate limits are strictly managed using batch processing and strategic `time.sleep()` intervals, ensuring the pipeline does not fail with `429 RESOURCE_EXHAUSTED` errors.
-- **Dynamic Routing**: Only the necessary loaders are invoked based on the file type, preventing unnecessary processing overhead.
-
----
-
-## Current Features
-
-- Multi-modal upload support (Up to 4 files: PDFs & Images).
-- Automated document routing and unified formatting.
-- Image-to-text semantic translation via Gemini Vision.
-- Stateful Streamlit UI with intelligent caching.
-- Pinecone vector database integration with automatic stale-data cleanup.
-- LCEL-based Q&A generation pipeline.
+- **Rate-Limit Throttling Mitigation**: Google Gemini Free Tier imposes strict limits (15 RPM). To prevent `429 Resource Exhausted` exceptions during batch indexing, vector ingestion processes in batches of 5 with controlled delay intervals and auto-retries (`max_retries=4`).
+- **Image-to-Text Pipeline Trade-off**: Rather than running dual vector indices for text and images, images are translated to text descriptions via `gemini-3.1-flash-lite` first. This unifies all data into a single 768-dimensional text embedding space for low-cost, simplified search.
+- **Session-State Invalidation**: Re-indexing is conditionally triggered based on sorted filename array matches (`st.session_state.processed_files`), preventing wasteful API calls during active user questioning.
 
 ---
 
-## Upcoming Features
+## Current Implementation Status
 
-- **Chat History**: Maintaining conversation memory for follow-up questions.
-- **Expanded File Support**: Adding support for `.docx`, `.txt`, and `.csv` files.
-- **Cloud Storage Integration**: Direct ingestion from Google Drive and AWS S3.
+- [x] Multi-file PDF parsing via PyMuPDF.
+- [x] Multi-image OCR/description conversion via Gemini Vision.
+- [x] Pinecone vector index initialization & similarity retrieval.
+- [x] LCEL chain integration (`retriever | prompt | llm | output_parser`).
+- [x] API exception handling with retry wrappers.
+- [x] Stateful Streamlit UI layout.
+
+---
+
+## Future Roadmap & Improvements
+
+- [ ] **Deterministic Chunk Hashing**: Replace standard Python hashing with `SHA-256` content hashing to enable true vector deduplication across sessions.
+- [ ] **Multi-Tenant Namespaces**: Partition Pinecone indices using session/user namespaces to guarantee data isolation in multi-user deployments.
+- [ ] **Asynchronous Processing**: Introduce Celery & Redis task queues to process large document batches without blocking UI execution.
+- [ ] **Hybrid Search Integration**: Combine dense vector similarity with BM25 sparse keyword matching for improved retrieval on technical codes and product IDs.
+- [ ] **In-Memory File Handling**: Transition from temporary disk writes (`uploads/`) to in-memory byte streams (`io.BytesIO`) with explicit cleanup.
 
 ---
 
 ## External API Integrations
 
-MultiRAG relies on a robust backend architecture that orchestrates multiple external APIs:
-- **Google Gemini API**: Makes `POST` requests to generate high-dimensional text embeddings, process images using Gemini Vision, and generate the final RAG text responses.
-- **Pinecone API**: Makes batched `POST` requests (upserts) to securely store vector data and handles `POST` query requests to perform sub-second cosine similarity searches across the document database.
+- **Google Gemini API**: Utilized for `text-embedding-004` vector generation, `gemini-3.1-flash-lite` visual content description, and `gemini-flash-latest` RAG context answering.
+- **Pinecone API**: Utilized for cloud vector storage, batched upserts, and cosine similarity query retrieval.
 
 ---
 
@@ -237,3 +220,4 @@ MultiRAG relies on a robust backend architecture that orchestrates multiple exte
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
+

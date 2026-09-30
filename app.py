@@ -60,7 +60,8 @@ if uploaded_files:
         index = get_retriever()
         llm = ChatGoogleGenerativeAI(
             model="gemini-flash-latest",
-            google_api_key=GOOGLE_API_KEY
+            google_api_key=GOOGLE_API_KEY,
+            max_retries=4
         )
 
         def retrieve_context(question: str) -> str:
@@ -88,8 +89,12 @@ if uploaded_files:
         query = st.text_input("Ask a question about the documents:")
         if query:
             with st.spinner("Generating answer..."):
-                answer = rag_chain.invoke(query)
-            st.write("### Answer:")
-            st.info(answer)
+                try:
+                    answer = rag_chain.invoke(query)
+                    st.write("### Answer:")
+                    st.info(answer)
+                except Exception as e:
+                    st.error("Google Gemini API is currently experiencing high demand (503 Service Unavailable). Please wait a few seconds and try again.")
+                    st.caption(f"Error details: {e}")
 
 
