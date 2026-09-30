@@ -2,7 +2,7 @@
 
 Python • Streamlit • LangChain • Gemini • Pinecone • PyMuPDF • Multi-Modal RAG
 
-**[🌐 View Live Streamlit App Here](https://your-app-url-goes-here.streamlit.app/)**
+**[🌐 View Live Streamlit App Here](https://multirag-docmind-ai.streamlit.app)**
 
 MultiRAG is a multi-modal Retrieval-Augmented Generation (RAG) pipeline built to bridge structured document extraction and visual content analysis. It enables users to upload multiple PDFs and images (`.png`, `.jpg`, `.jpeg`), indexes them into a unified vector space via Pinecone, and answers context-specific questions with source-bounded responses using Google's Gemini models.
 
