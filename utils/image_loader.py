@@ -4,7 +4,9 @@ from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.documents import Document
 from config import GOOGLE_API_KEY
+from utils.error_handler import handle_errors
 
+@handle_errors(fallback=[])
 def describe_image(image_path):
     with open(image_path, "rb") as image_file:
         image_bytes = image_file.read()

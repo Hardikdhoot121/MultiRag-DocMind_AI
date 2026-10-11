@@ -1,4 +1,5 @@
 import streamlit as st
+import hashlib
 from routes.file_router import file_router
 from utils.file_handler import save_uploaded_file
 from utils.chunking import createChunks
@@ -7,10 +8,9 @@ from models.vector_store import upload_to_pinecone
 from utils.retrieval import get_retriever
 from utils.prompt import get_rag_prompt
 import math
-from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
-from config import GOOGLE_API_KEY
+from config import GOOGLE_API_KEY, TOP_K, SCORE_THRESHOLD
 
 st.set_page_config(page_title="DocMind AI")
 st.title("📚 DocMind AI")
@@ -25,16 +25,18 @@ if uploaded_files:
     if len(uploaded_files) > 4:
         st.error("You can only upload a maximum of 4 files")
     else :
-        file_paths=[] #This will be send to router 
+        file_paths=[] # This will be send to router 
+        file_hashes=[]
         for uploaded_file in uploaded_files:
-            temp_path=save_uploaded_file(uploaded_file)
+            temp_path, content_hash=save_uploaded_file(uploaded_file)
             file_paths.append(temp_path)
+            file_hashes.append(content_hash)
 
         st.success("All Files Uploaded successfully")
         
-        # check -> if previously uploaded then just fetch the embeddings 
-        #       -> else run the entire pipeline 
-        current_files_hash = ",".join(sorted([f.name for f in uploaded_files]))
+        # SHA-256 content hash -> detects actual content changes, not just filename
+        combined = "|".join(sorted(file_hashes))
+        current_files_hash = hashlib.sha256(combined.encode()).hexdigest()
         if "uploaded_files_hash" not in st.session_state or st.session_state.uploaded_files_hash != current_files_hash:
      
             result = file_router(file_paths)
@@ -48,7 +50,7 @@ if uploaded_files:
 
             with st.spinner("Embedding and uploading to Pinecone..."):
                 embedding_model = getEmbeddings()
-                upload_to_pinecone(chunks, embedding_model)
+                upload_to_pinecone(chunks, embedding_model, namespace=current_files_hash)
 
             st.session_state.uploaded_files_hash = current_files_hash
             st.session_state.embedding_model = embedding_model
@@ -56,7 +58,7 @@ if uploaded_files:
         else:
             embedding_model = st.session_state.embedding_model
 
-        # RETRIEVAL (runs every timedef , but is instant)
+        # METRIEVAL WITH METADATA FILTERING, NAMESPACE ISOLATION, AND SCORE THRESHOLD
         index = get_retriever()
         llm = ChatGoogleGenerativeAI(
             model="gemini-flash-latest",
@@ -64,35 +66,85 @@ if uploaded_files:
             max_retries=4
         )
 
-        def retrieve_context(question: str) -> str:
+        uploaded_doc_names = [f.name for f in uploaded_files]
+        selected_doc = st.selectbox(
+            "🎯 Filter by Document (Optional):",
+            options=["All Documents"] + uploaded_doc_names,
+            index=0
+        )
+        def retrieve_and_format_context(inputs: dict) -> dict:
+            question = inputs["question"]
+            doc_filter = inputs.get("doc_filter", "All Documents")
+            
+            # Metadata filters with metadata 
+            pinecone_filter = None
+            if doc_filter != "All Documents":
+                pinecone_filter = {"source": {"$eq": doc_filter}}
+
             query_vector = embedding_model.embed_query(question)
             response = index.query(
                 vector=query_vector,
-                top_k=3,
-                include_metadata=True
+                top_k=TOP_K,
+                include_metadata=True,
+                namespace=st.session_state.uploaded_files_hash,
+                filter=pinecone_filter
             )
-            return "\n\n".join([match["metadata"]["text"] for match in response["matches"]])
-        # AUGEMENTATION 
-        prompt = get_rag_prompt()
-
-        # Build the sequential and parallel chain using LangChain Runnables (LCEL)
-        rag_chain = (
-            {
-                "context": retrieve_context,
-                "question": RunnablePassthrough()
+            
+            filtered_matches = [
+                m for m in response.get("matches", []) 
+                if m.get("score", 0) >= SCORE_THRESHOLD   # Threshold of .35 for filtering from env variables 
+            ]
+            
+            if not filtered_matches:
+                return {"context": "", "sources": []}
+            
+            context_blocks = []
+            sources = []
+            for i, match in enumerate(filtered_matches, 1):
+                meta = match["metadata"]
+                source_file = meta.get("source", "Uploaded Document")
+                page_num = meta.get("page_number", meta.get("page", None))
+                page_info = f", Page {page_num}" if page_num is not None else ""
+                
+                context_blocks.append(f"[Source {i}: {source_file}{page_info}]\n{meta.get('text', '')}")
+                sources.append(f"📄 **{source_file}**{page_info} (Relevance: {match.get('score', 0):.2f})")
+                
+            return {
+                "context": "\n\n".join(context_blocks),
+                "sources": sources
             }
-            | prompt
-            | llm
-            | StrOutputParser()
-        )
-        # GENERATION
+
+        prompt = get_rag_prompt()
+        output_parser = StrOutputParser()
+
+        # clean LCEL Chain Pipeline
+        def run_rag_pipeline(question: str, doc_filter: str):
+            retrieved = retrieve_and_format_context({"question": question, "doc_filter": doc_filter})
+            if not retrieved["context"]:
+                return "⚠️ No relevant information found in the uploaded documents for this query.", []
+            
+            chain = prompt | llm | output_parser  # chaining 
+            answer = chain.invoke({
+                "context": retrieved["context"],
+                "question": question
+            })
+            return answer, retrieved["sources"]
+
+        # GENERATION UI
         query = st.text_input("Ask a question about the documents:")
         if query:
-            with st.spinner("Generating answer..."):
+            with st.spinner("Searching documents & generating answer..."):
                 try:
-                    answer = rag_chain.invoke(query)
+                    answer, sources = run_rag_pipeline(query, selected_doc)
                     st.write("### Answer:")
-                    st.info(answer)
+                    if answer.startswith("⚠️"):
+                        st.warning(answer)
+                    else:
+                        st.info(answer)
+                        if sources:
+                            with st.expander("📍 View Retrieved Sources & Citation Scores"):
+                                for src in sources:
+                                    st.write(src)
                 except Exception as e:
                     st.error("Google Gemini API is currently experiencing high demand (503 Service Unavailable). Please wait a few seconds and try again.")
                     st.caption(f"Error details: {e}")

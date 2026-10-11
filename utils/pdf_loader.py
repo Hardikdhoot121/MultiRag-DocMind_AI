@@ -1,6 +1,9 @@
 import fitz
 import os 
 from langchain_core.documents import Document
+from utils.error_handler import handle_errors
+
+@handle_errors(fallback=[])
 def extract_pdf(pdf_path):
     doc = fitz.open(pdf_path)
     documents=[]
