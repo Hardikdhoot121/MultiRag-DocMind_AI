@@ -25,16 +25,15 @@ if uploaded_files:
     if len(uploaded_files) > 4:
         st.error("You can only upload a maximum of 4 files")
     else :
-        file_paths=[] # This will be send to router 
-        file_hashes=[]
+        file_paths = []
+        file_hashes = []
         for uploaded_file in uploaded_files:
-            temp_path, content_hash=save_uploaded_file(uploaded_file)
+            temp_path, content_hash = save_uploaded_file(uploaded_file)
             file_paths.append(temp_path)
             file_hashes.append(content_hash)
 
         st.success("All Files Uploaded successfully")
         
-        # SHA-256 content hash -> detects actual content changes, not just filename
         combined = "|".join(sorted(file_hashes))
         current_files_hash = hashlib.sha256(combined.encode()).hexdigest()
         if "uploaded_files_hash" not in st.session_state or st.session_state.uploaded_files_hash != current_files_hash:
@@ -58,7 +57,6 @@ if uploaded_files:
         else:
             embedding_model = st.session_state.embedding_model
 
-        # METRIEVAL WITH METADATA FILTERING, NAMESPACE ISOLATION, AND SCORE THRESHOLD
         index = get_retriever()
         llm = ChatGoogleGenerativeAI(
             model="gemini-flash-latest",
@@ -92,7 +90,7 @@ if uploaded_files:
             
             filtered_matches = [
                 m for m in response.get("matches", []) 
-                if m.get("score", 0) >= SCORE_THRESHOLD   # Threshold of .35 for filtering from env variables 
+                if m.get("score", 0) >= SCORE_THRESHOLD
             ]
             
             if not filtered_matches:
@@ -103,11 +101,20 @@ if uploaded_files:
             for i, match in enumerate(filtered_matches, 1):
                 meta = match["metadata"]
                 source_file = meta.get("source", "Uploaded Document")
-                page_num = meta.get("page_number", meta.get("page", None))
-                page_info = f", Page {page_num}" if page_num is not None else ""
+                doc_type = meta.get("doc_type", "pdf")
+                content_type = meta.get("content_type", "text")
                 
-                context_blocks.append(f"[Source {i}: {source_file}{page_info}]\n{meta.get('text', '')}")
-                sources.append(f"📄 **{source_file}**{page_info} (Relevance: {match.get('score', 0):.2f})")
+                if doc_type == "image":
+                    tag = f"[Source {i} (Image: {source_file} | Type: {content_type.upper()})]"
+                    citation = f"🖼️ **{source_file}** ({content_type.upper()}) (Relevance: {match.get('score', 0):.2f})"
+                else:
+                    page_num = meta.get("page_number", meta.get("page", None))
+                    page_info = f", Page {page_num}" if page_num is not None else ""
+                    tag = f"[Source {i} (Document: {source_file}{page_info})]"
+                    citation = f"📄 **{source_file}**{page_info} (Relevance: {match.get('score', 0):.2f})"
+
+                context_blocks.append(f"{tag}\n{meta.get('text', '')}")
+                sources.append(citation)
                 
             return {
                 "context": "\n\n".join(context_blocks),
@@ -123,14 +130,13 @@ if uploaded_files:
             if not retrieved["context"]:
                 return "⚠️ No relevant information found in the uploaded documents for this query.", []
             
-            chain = prompt | llm | output_parser  # chaining 
+            chain = prompt | llm | output_parser
             answer = chain.invoke({
                 "context": retrieved["context"],
                 "question": question
             })
             return answer, retrieved["sources"]
 
-        # GENERATION UI
         query = st.text_input("Ask a question about the documents:")
         if query:
             with st.spinner("Searching documents & generating answer..."):

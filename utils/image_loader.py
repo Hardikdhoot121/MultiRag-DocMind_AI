@@ -11,7 +11,6 @@ def describe_image(image_path):
     with open(image_path, "rb") as image_file:
         image_bytes = image_file.read()
         
-    # converts image byte to a base64 encoded string
     image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
     model = ChatGoogleGenerativeAI(
@@ -23,7 +22,12 @@ def describe_image(image_path):
         content=[
             {
                 "type": "text", 
-                "text": "Describe this image in full detail. Extract all visible text, diagrams, tables, flowcharts, and core concepts."
+                "text": (
+                    "Analyze this image and extract content strictly into these 3 sections:\n\n"
+                    "### [TEXT_CONTENT]\nExtract all readable text verbatim.\n\n"
+                    "### [TABLE_DATA]\nConvert all tabular data, receipts, or numerical rows into Markdown tables (| col | col |). If none, write 'None'.\n\n"
+                    "### [VISUAL_DIAGRAM]\nExplain any diagrams, flowcharts, or architecture in 'Entity A -> Entity B' relationship format. If none, write 'None'."
+                )
             },
             {
                 "type": "image_url",
@@ -43,13 +47,46 @@ def describe_image(image_path):
     except Exception as e:
         content_text = f"[Image description temporary error: {e}]"
 
-    # wrap it with meta data and return as list format
-    doc = Document(
-        page_content=content_text,
-        metadata={
-            "source": os.path.basename(image_path),
-            "doc_type": "image"
-        }
-    )
-     
-    return [doc]
+    # Parse into semantic documents
+    markers = [
+        ("[TEXT_CONTENT]", "text"),
+        ("[TABLE_DATA]", "table"),
+        ("[VISUAL_DIAGRAM]", "diagram")
+    ]
+    documents = []
+    current_type = "general"
+    current_lines = []
+
+    for line in content_text.splitlines():
+        matched = False
+        for marker, ctype in markers:
+            if marker in line:
+                if current_lines:
+                    text_block = "\n".join(current_lines).strip()
+                    if text_block and text_block.lower() != "none":
+                        documents.append(Document(
+                            page_content=text_block,
+                            metadata={"source": os.path.basename(image_path), "doc_type": "image", "content_type": current_type, "image_path": image_path}
+                        ))
+                current_type = ctype
+                current_lines = []
+                matched = True
+                break
+        if not matched:
+            current_lines.append(line)
+
+    if current_lines:
+        text_block = "\n".join(current_lines).strip()
+        if text_block and text_block.lower() != "none":
+            documents.append(Document(
+                page_content=text_block,
+                metadata={"source": os.path.basename(image_path), "doc_type": "image", "content_type": current_type, "image_path": image_path}
+            ))
+
+    if not documents:
+        documents = [Document(
+            page_content=content_text,
+            metadata={"source": os.path.basename(image_path), "doc_type": "image", "content_type": "general", "image_path": image_path}
+        )]
+
+    return documents

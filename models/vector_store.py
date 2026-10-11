@@ -57,16 +57,17 @@ def upload_to_pinecone(chunks, embedding_model, namespace="docmind-default", del
     vectors = []
     for i, (text, emb, doc) in enumerate(zip(texts, embeddings, chunks)):
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        clean_metadata = {k: v for k, v in doc.metadata.items() if v is not None}
+        clean_metadata["text"] = text
+        clean_metadata.setdefault("doc_type", "pdf")
+        clean_metadata.setdefault("content_type", "text")
+
         vectors.append({
             "id": f"chunk_{content_hash}",
             "values": emb,
-            "metadata": {
-                "text": text,
-                **doc.metadata
-            }
+            "metadata": clean_metadata
         })
     
-    # Upsert in batches of 50
     batch_size = UPSERT_BATCH_SIZE
     for i in range(0, len(vectors), batch_size):
         batch = vectors[i:i + batch_size]

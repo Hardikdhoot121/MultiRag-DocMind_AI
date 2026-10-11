@@ -18,7 +18,6 @@ def _process_single_file(file_path):
 @handle_errors(fallback=[])
 def file_router(file_paths):
     all_documents = []
-    # Parallelize file reading using ThreadPoolExecutor (max 2 workers)
     with ThreadPoolExecutor(max_workers=min(2, len(file_paths) or 1)) as executor:
         results = executor.map(_process_single_file, file_paths)
         for docs in results:

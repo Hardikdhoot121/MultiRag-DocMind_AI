@@ -20,4 +20,3 @@ def extract_pdf(pdf_path):
                 }
             ))
     return documents
-#fitz function internally reads the document , like OS open file , then read byte , parse pdf , create doc object and return 
